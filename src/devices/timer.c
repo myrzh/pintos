@@ -1,3 +1,5 @@
+#include "lib/kernel/list.h"
+#include "threads/malloc.h"
 #include "devices/timer.h"
 #include <debug.h>
 #include <inttypes.h>
@@ -29,6 +31,61 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
+
+struct waitlist_elem {
+  struct list_elem elem;
+  struct thread *thread;
+  int64_t ticks;
+};
+
+int64_t threads_list_size;
+struct list threads_list;
+
+static bool compare_waitlist_elems(const struct list_elem *a, 
+                        const struct list_elem *b, 
+                        void *aux) {
+
+    struct waitlist_elem *q_a = list_entry(a, struct waitlist_elem, elem);
+    struct waitlist_elem *q_b = list_entry(b, struct waitlist_elem, elem);
+
+    return q_a->ticks < q_b->ticks; 
+}
+
+static bool is_interior_custom (struct list_elem *elem)
+{
+  return elem != NULL && elem->prev != NULL && elem->next != NULL;
+}
+
+static bool is_tail_custom (struct list_elem *elem)
+{
+  return elem != NULL && elem->prev != NULL && elem->next == NULL;
+}
+
+static void wake_threads(void) {
+  struct list_elem *curr_list_elem = list_end(&threads_list);
+  if (is_interior_custom (curr_list_elem) || is_tail_custom (curr_list_elem)) {
+    while(curr_list_elem != list_begin(&threads_list)) {
+      struct list_elem *prev = list_prev(curr_list_elem); // we can potentially delete curr_list_elem
+      struct waitlist_elem *curr_waitlist_elem = list_entry(curr_list_elem, struct waitlist_elem, elem);
+
+      if (ticks == curr_waitlist_elem->ticks) {
+        thread_unblock(curr_waitlist_elem->thread);
+        list_remove(curr_list_elem);
+        threads_list_size--;
+      }
+      curr_list_elem = prev;
+    }
+    if (curr_list_elem == list_begin(&threads_list)) {
+      struct waitlist_elem *curr_waitlist_elem = list_entry(curr_list_elem, struct waitlist_elem, elem);
+
+      if (ticks == curr_waitlist_elem->ticks) {
+        thread_unblock(curr_waitlist_elem->thread);
+        list_remove(curr_list_elem);
+        threads_list_size--;
+      }
+    }
+  }
+}
 
 /** Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
@@ -89,11 +146,33 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
+  if (ticks <= 0) {
+    return;
+  }
+
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+
+  struct waitlist_elem *tmp_thread = malloc(sizeof(struct waitlist_elem));
+  tmp_thread->thread = thread_current();
+  tmp_thread->ticks = start + ticks;
+  ASSERT (tmp_thread != NULL);
+
+  threads_list_size++;
+  if (threads_list_size <= 1) {
+    list_init(&threads_list);
+    list_push_front(&threads_list, &tmp_thread->elem);
+  } else {
+    list_insert_ordered(&threads_list, &tmp_thread->elem, compare_waitlist_elems, NULL);
+  }
+
+  intr_disable();
+  thread_block();
+  intr_enable();
+
+  // while (timer_elapsed (start) < ticks)
+  //   thread_yield ();
 }
 
 /** Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -171,7 +250,10 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
-  thread_tick ();
+
+  wake_threads();
+
+  thread_tick();
 }
 
 /** Returns true if LOOPS iterations waits for more than one timer
