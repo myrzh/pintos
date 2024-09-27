@@ -22,7 +22,8 @@
 
 /** List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
-static struct list ready_list;
+// static struct list ready_list;
+struct list ready_list;
 
 /** List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -84,6 +85,24 @@ static tid_t allocate_tid (void);
 
    It is not safe to call thread_current() until this function
    finishes. */
+
+bool compare_threads_by_priority(struct list_elem *elem1, struct list_elem *elem2, void *aux) { 
+  struct thread *q1 = list_entry(elem1, struct thread, elem);
+  struct thread *q2 = list_entry(elem2, struct thread, elem);
+  return (q1->priority > q2->priority);
+}
+
+void delete_donated_priority(struct thread *current_thread, int priority_to_delete) {
+  int priority_index = 0; // a variable to track the index of the current priority being checked.
+  while (priority_index < (current_thread->donated_priorities_size) - 1) { // loop through the donated priorities array
+    if (current_thread->donated_priorities[priority_index] == priority_to_delete) { // is the current priority the one that needs to be deleted
+      current_thread->donated_priorities[priority_index] = current_thread->donated_priorities[priority_index + 1]; // shift the next priority into the current index
+    }
+    priority_index++; // increment index variable
+  }
+  current_thread->donated_priorities_size--; // decrement the size of the donated_priorities array
+}
+
 void
 thread_init (void) 
 {
@@ -200,6 +219,7 @@ thread_create (const char *name, int priority,
 
   /* Add to run queue. */
   thread_unblock (t);
+  thread_yield();
 
   return tid;
 }
@@ -237,7 +257,8 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  // list_push_back (&ready_list, &t->elem);
+  list_insert_ordered (&ready_list, &t->elem, compare_threads_by_priority, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -307,8 +328,10 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+  if (cur != idle_thread) {
+    // list_push_back (&ready_list, &cur->elem);
+    list_insert_ordered (&ready_list, &cur->elem, compare_threads_by_priority, NULL);
+  }
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -335,7 +358,11 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  thread_current()->donated_priorities[0] = new_priority;
+  if (thread_current()->donated_priorities_size == 1) { 
   thread_current ()->priority = new_priority;
+    thread_yield();
+  }
 }
 
 /** Returns the current thread's priority. */
@@ -462,6 +489,11 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+ 
+  t->donated_priorities[0] = priority;
+  t->donations_count = 0;
+  t->donated_priorities_size = 1;
+  t->condition_lock = NULL;
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
