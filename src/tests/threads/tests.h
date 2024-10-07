@@ -4,6 +4,10 @@
 void run_test (const char *);
 
 typedef void test_func (void);
+typedef void test_func_args_1uint (unsigned int);
+typedef void test_func_args_2uint (unsigned int, unsigned int);
+typedef void test_func_args_3uint (unsigned int, unsigned int, unsigned int);
+typedef void test_func_args_4uint (unsigned int, unsigned int, unsigned int, unsigned int);
 
 extern test_func test_alarm_single;
 extern test_func test_alarm_multiple;
@@ -32,6 +36,9 @@ extern test_func test_mlfqs_fair_20;
 extern test_func test_mlfqs_nice_2;
 extern test_func test_mlfqs_nice_10;
 extern test_func test_mlfqs_block;
+
+void test_narrow_bridge(unsigned int num_vehicles_left, unsigned int num_vehicles_right,
+        unsigned int num_emergency_left, unsigned int num_emergency_right);
 
 void msg (const char *, ...);
 void fail (const char *, ...);
