@@ -8,66 +8,124 @@
 #include "threads/synch.h"
 #include "narrow-bridge.h"
 
-struct semaphore bridge_semaphore;
-struct semaphore left_semaphore;
-struct semaphore right_semaphore;
-int bridge_count;
-enum car_direction current_direction;
-
-// Called before test. Can initialize some synchronization objects.
-void narrow_bridge_init(void)
-{
-    sema_init(&bridge_semaphore, 3); // Max 3 cars on the bridge
-    sema_init(&left_semaphore, 0);   // Semaphore for left-going cars
-    sema_init(&right_semaphore, 0);  // Semaphore for right-going cars
-    bridge_count = 0;
-    current_direction = dir_left; // Initialize direction
+struct semaphore directions_sema[2][2]; // Matrix with all semaphores
+struct semaphore bridge_sema; // Semaphore of bridge
+uint16_t cars_counts[2][2]; // Number of all types of cars
+uint16_t occupied_places = 0; // Occupied places on bridge
+uint16_t current_cars_count, all_active_cars; // Number of current all cars and non blocked cars
+uint16_t current_dir; // Current bridge direction
+uint16_t type; // Type of car
+bool is_moving_started;
+void narrow_bridge_init(void) {
+  is_moving_started = false;
+  type = 0;
+  sema_init( & bridge_sema, 1);
+  for (int i = 0; i < 2; i++) {
+    sema_init( & directions_sema[i][0], 0);
+    sema_init( & directions_sema[i][1], 0);
+  }
 }
-
-void arrive_bridge(enum car_priority prio, enum car_direction dir)
-{
-    if (prio == car_emergency) {
-        sema_down(&bridge_semaphore);
-        bridge_count++;
-        return; // Emergency vehicles bypass the direction logic
-    }
-
-    if (dir == current_direction) {
-        sema_down(&bridge_semaphore);
-        bridge_count++;
-        if (dir == dir_left) 
-           sema_up(&left_semaphore);
-        else
-           sema_up(&right_semaphore);
+/*
+Set two cars of one type if bridge if full emty
+*/
+void _up_two_to_bridge() {
+  for (uint8_t i = 0; i < 2; i++) {
+    sema_up( & directions_sema[type][current_dir]);
+    sema_down( & bridge_sema);
+  }
+  occupied_places += 2;
+  type = 0;
+}
+void _up_solo_to_bridge() {
+  sema_down( & bridge_sema);
+  sema_up( & directions_sema[type][current_dir]);
+  sema_down( & bridge_sema);
+  occupied_places++;
+  type = 0;
+}
+/*
+Move normal car with emergency if emergency is last on current direction
+*/
+void _last_emer_w_normal() {
+  sema_up( & directions_sema[1][current_dir]);
+  sema_up( & directions_sema[0][current_dir]);
+  sema_down( & bridge_sema);
+  sema_down( & bridge_sema);
+  occupied_places += 2;
+}
+/*
+Choose correct cars to move
+*/
+void move_to_bridge() {
+  if (cars_counts[1][current_dir] >= 2) // We have two blocked emergency
+  {
+    type = 1;
+    _up_two_to_bridge();
+  } else if (cars_counts[1][current_dir] == 1) // Last emergency on current direction
+  {
+    if (cars_counts[0][current_dir] >= 1) {
+      _last_emer_w_normal();
     } else {
-         if (dir == dir_left)
-            sema_down(&left_semaphore);
-         else
-            sema_down(&right_semaphore);
-         sema_down(&bridge_semaphore);
-         bridge_count++;
+      type = 1;
+      _up_solo_to_bridge();
     }
+  } else if (cars_counts[0][current_dir] >= 2) // We have two normal blocked cars and empty bridge
+  {
+    _up_two_to_bridge();
+  } else if (cars_counts[0][current_dir] == 1) // We have the last car on current direction
+  {
+    _up_solo_to_bridge();
+  } else {
+    for (uint8_t i = 0; i < 2; i++) {
+      sema_down( & bridge_sema);
+    }
+  }
 }
-
-void exit_bridge(enum car_priority prio, enum car_direction dir)
-{
-    bridge_count--;
-    sema_up(&bridge_semaphore);
-    
-    if (prio == car_emergency) return; // Emergency cars don't influence direction
-
-    if (bridge_count == 0) {
-        // Switch direction if there are waiting cars in the opposite direction
-        if (dir == dir_left && !list_empty(&right_semaphore.waiters)) {
-           current_direction = dir_right;
-           for (int i = 0; i < 3 && !list_empty(&right_semaphore.waiters); i++) {
-             sema_up(&right_semaphore);
-           }
-        } else if (dir == dir_right && !list_empty(&left_semaphore.waiters)) {
-           current_direction = dir_left;
-           for (int i = 0; i < 3 && !list_empty(&left_semaphore.waiters); i++) {
-             sema_up(&left_semaphore);
-           }
-        }
+void arrive_bridge(enum car_priority prio, enum car_direction dir) {
+  cars_counts[prio][dir]++;
+  thread_yield(); // Count all types of cars
+  if (!is_moving_started) {
+    current_dir = ((cars_counts[1][0] > cars_counts[1][1] && cars_counts[1][0] !=
+      cars_counts[1][1]) ? dir_left : dir_right); // Choose start direction
+    if (cars_counts[1][0] == cars_counts[1][1])
+      current_dir = ((cars_counts[0][0] >= cars_counts[0][1]) ? dir_left : dir_right);
+    all_active_cars = cars_counts[0][0] + cars_counts[0][1] + cars_counts[1][0] +
+      cars_counts[1][1];
+    is_moving_started = true;
+  }
+  if (all_active_cars > 1) // Block all cars and move them to their semaphores
+  {
+    all_active_cars--;
+    sema_down( & directions_sema[prio][dir]);
+  }
+  if (all_active_cars == 1) // If last non blocked car then we should start "list"
+  {
+    all_active_cars--;
+    for (uint8_t i = 0; i < 2; i++) {
+      sema_up( & bridge_sema);
     }
+    move_to_bridge();
+    sema_down( & directions_sema[prio][dir]);
+  }
+}
+void exit_bridge(enum car_priority prio, enum car_direction dir) {
+  cars_counts[prio][dir]--;
+  current_cars_count = cars_counts[0][0] + cars_counts[0][1] + cars_counts[1][0] +
+    cars_counts[1][1]; // Count all cars
+  occupied_places--;
+  if (current_cars_count && occupied_places % 2 == 0) // If we have cars and our bridge is not empty
+  {
+    if (!cars_counts[1][current_dir ^ 1] && cars_counts[1][current_dir])
+      current_dir ^= 1;
+    if ((current_dir == dir_right || current_dir == dir_left) && !(cars_counts[0][current_dir ^
+        1
+      ] + cars_counts[1][current_dir ^ 1]))
+      current_dir ^= 1;
+    current_dir ^= 1;
+    for (uint8_t i = 0; i < 2; i++) // Move cars from bridge
+    {
+      sema_up( & bridge_sema);
+    }
+    move_to_bridge();
+  }
 }
