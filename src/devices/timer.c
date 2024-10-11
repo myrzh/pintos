@@ -7,6 +7,8 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include <stdlib.h>
+#include "threads/malloc.h"
   
 /** See [8254] for hardware details of the 8254 timer chip. */
 
@@ -29,6 +31,17 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
+
+/** List of processes in THREAD_BLOCKED state. */
+// static struct list wait_list;
+struct thread **wait_list;
+int wait_list_size = 0;
+
+int compare_threads(const void *a, const void *b) {
+  struct thread *thread_a = (struct thread *)a;
+  struct thread *thread_b = (struct thread *)b;
+  return thread_a->wake_time - thread_b->wake_time;
+}
 
 /** Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
@@ -89,11 +102,33 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
-  int64_t start = timer_ticks ();
+  // int64_t start = timer_ticks ();
+ 
+  if (ticks <= 0)
+    return;
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  // while (timer_elapsed (start) < ticks) 
+  //   thread_yield ();
+
+  struct thread *t = thread_current ();
+  t->wake_time = timer_ticks () + ticks;
+
+  intr_disable ();
+
+  wait_list_size++;
+  if (wait_list_size <= 1) {
+    wait_list = (struct thread**)malloc(sizeof(struct thread *));
+    wait_list[0] = t;
+  } else {
+    wait_list = (struct thread**)realloc(wait_list, (wait_list_size) * sizeof(struct thread *));
+    wait_list[wait_list_size] = t;
+    qsort(wait_list, wait_list_size, sizeof(struct thread *), compare_threads);
+  }
+
+  intr_enable ();
+
+  sema_down(&t->sema);
 }
 
 /** Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -171,7 +206,17 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
-  thread_tick ();
+  thread_tick();
+  struct thread *t;
+
+  while (wait_list_size > 0) {
+    t = wait_list[wait_list_size - 1];
+    if (ticks < t->wake_time)
+      break;
+    sema_up(&t->sema);
+    wait_list[wait_list_size - 1] = NULL;
+    wait_list_size--;
+  }
 }
 
 /** Returns true if LOOPS iterations waits for more than one timer
