@@ -16,15 +16,7 @@ uint16_t current_cars_count, all_active_cars; // Number of current all cars and 
 uint16_t current_dir; // Current bridge direction
 uint16_t type; // Type of car
 bool is_moving_started;
-void narrow_bridge_init(void) {
-  is_moving_started = false;
-  type = 0;
-  sema_init( & bridge_sema, 1);
-  for (int i = 0; i < 2; i++) {
-    sema_init( & directions_sema[i][0], 0);
-    sema_init( & directions_sema[i][1], 0);
-  }
-}
+
 /*
 Set two cars of one type if bridge if full emty
 */
@@ -36,6 +28,7 @@ void _up_two_to_bridge() {
   occupied_places += 2;
   type = 0;
 }
+
 void _up_solo_to_bridge() {
   sema_down( & bridge_sema);
   sema_up( & directions_sema[type][current_dir]);
@@ -43,6 +36,7 @@ void _up_solo_to_bridge() {
   occupied_places++;
   type = 0;
 }
+
 /*
 Move normal car with emergency if emergency is last on current direction
 */
@@ -53,6 +47,7 @@ void _last_emer_w_normal() {
   sema_down( & bridge_sema);
   occupied_places += 2;
 }
+
 /*
 Choose correct cars to move
 */
@@ -81,6 +76,18 @@ void move_to_bridge() {
     }
   }
 }
+
+// Called before test. Can initialize some synchronization objects.
+void narrow_bridge_init(void) {
+  is_moving_started = false;
+  type = 0;
+  sema_init( & bridge_sema, 1);
+  for (int i = 0; i < 2; i++) {
+    sema_init( & directions_sema[i][0], 0);
+    sema_init( & directions_sema[i][1], 0);
+  }
+}
+
 void arrive_bridge(enum car_priority prio, enum car_direction dir) {
   cars_counts[prio][dir]++;
   thread_yield(); // Count all types of cars
@@ -108,6 +115,7 @@ void arrive_bridge(enum car_priority prio, enum car_direction dir) {
     sema_down( & directions_sema[prio][dir]);
   }
 }
+
 void exit_bridge(enum car_priority prio, enum car_direction dir) {
   cars_counts[prio][dir]--;
   current_cars_count = cars_counts[0][0] + cars_counts[0][1] + cars_counts[1][0] +
