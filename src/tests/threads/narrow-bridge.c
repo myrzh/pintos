@@ -8,132 +8,238 @@
 #include "threads/synch.h"
 #include "narrow-bridge.h"
 
-struct semaphore directions_sema[2][2]; // Matrix with all semaphores
-struct semaphore bridge_sema; // Semaphore of bridge
-uint16_t cars_counts[2][2]; // Number of all types of cars
-uint16_t occupied_places = 0; // Occupied places on bridge
-uint16_t current_cars_count, all_active_cars; // Number of current all cars and non blocked cars
-uint16_t current_dir; // Current bridge direction
-uint16_t type; // Type of car
-bool is_moving_started;
+enum operation
+{
+   increment = 0,
+   decrement = 1
+};
 
-/*
-Set two cars of one type if bridge if full emty
-*/
+struct semaphore norm_left_sema, norm_right_sema, emer_left_sema, emer_right_sema;
+struct semaphore general_sema;
+int norm_left, norm_right, emer_left, emer_right;
+int was_started = 0;
+int now_crossing;
+int cars_overall;
+int cars_unblocked;
+enum car_priority current_car = car_normal;
+enum car_direction current_direction;
+
+/** Set two cars of one type if bridge if full emty */
 void _up_two_to_bridge() {
-  for (uint8_t i = 0; i < 2; i++) {
-    sema_up( & directions_sema[type][current_dir]);
-    sema_down( & bridge_sema);
+  if (current_car == car_normal && current_direction == dir_left) {
+    sema_up(&norm_left_sema);
+  } else if (current_car == car_emergency && current_direction == dir_left) {
+    sema_up(&emer_left_sema);
+  } else if (current_car == car_normal && current_direction == dir_right) {
+    sema_up(&norm_right_sema);
+  } else if (current_car == car_emergency && current_direction == dir_right) {
+    sema_up(&emer_right_sema);
   }
-  occupied_places += 2;
-  type = 0;
-}
+  sema_down(&general_sema);
+  now_crossing += 2;
+  current_car = car_normal;
+}  
 
 void _up_solo_to_bridge() {
-  sema_down( & bridge_sema);
-  sema_up( & directions_sema[type][current_dir]);
-  sema_down( & bridge_sema);
-  occupied_places++;
-  type = 0;
+  sema_down(&general_sema);
+  if (current_car == car_normal && current_direction == dir_left) {
+    sema_up(&norm_left_sema);
+  } else if (current_car == car_emergency && current_direction == dir_left) {
+    sema_up(&emer_left_sema);
+  } else if (current_car == car_normal && current_direction == dir_right) {
+    sema_up(&norm_right_sema);
+  } else if (current_car == car_emergency && current_direction == dir_right) {
+    sema_up(&emer_right_sema);
+  }
+  sema_down(&general_sema);
+  now_crossing += 1;
+  current_car = car_normal;
 }
 
-/*
-Move normal car with emergency if emergency is last on current direction
-*/
+/** Move normal car with emergency if emergency is last on current direction */
 void _last_emer_w_normal() {
-  sema_up( & directions_sema[1][current_dir]);
-  sema_up( & directions_sema[0][current_dir]);
-  sema_down( & bridge_sema);
-  sema_down( & bridge_sema);
-  occupied_places += 2;
+  if (current_direction == dir_left) {
+    sema_up(&emer_left_sema);
+    sema_up(&norm_left_sema);
+  } else if (current_direction == dir_right) {
+    sema_up(&emer_right_sema);
+    sema_up(&norm_right_sema);
+  }
+  sema_down(&general_sema);
+  sema_down(&general_sema);
+  now_crossing += 2;
 }
 
-/*
-Choose correct cars to move
-*/
+/** Choose correct cars to move */
 void move_to_bridge() {
-  if (cars_counts[1][current_dir] >= 2) // We have two blocked emergency
-  {
-    type = 1;
-    _up_two_to_bridge();
-  } else if (cars_counts[1][current_dir] == 1) // Last emergency on current direction
-  {
-    if (cars_counts[0][current_dir] >= 1) {
-      _last_emer_w_normal();
-    } else {
-      type = 1;
-      _up_solo_to_bridge();
-    }
-  } else if (cars_counts[0][current_dir] >= 2) // We have two normal blocked cars and empty bridge
-  {
-    _up_two_to_bridge();
-  } else if (cars_counts[0][current_dir] == 1) // We have the last car on current direction
-  {
-    _up_solo_to_bridge();
-  } else {
-    for (uint8_t i = 0; i < 2; i++) {
-      sema_down( & bridge_sema);
-    }
+  switch (current_direction) {
+    case dir_left:
+      if (emer_left >= 2) {
+        current_car = car_emergency;
+        _up_two_to_bridge();
+      } else if (emer_left == 1) {
+        if (norm_left >= 1) {
+          _last_emer_w_normal();
+        } else {
+          current_car = car_emergency;
+          _up_solo_to_bridge();
+        }
+      } else if (norm_left >= 2) {
+        _up_two_to_bridge();
+      } else if (norm_left == 1) {
+        _up_solo_to_bridge();
+      } else {
+        sema_down(&general_sema);
+        sema_down(&general_sema);
+      }
+      break;
+    case dir_right:
+      if (emer_right >= 2) {
+        current_car = car_emergency;
+        _up_two_to_bridge();
+      } else if (emer_right == 1) {
+        if (norm_right >= 1) {
+          _last_emer_w_normal();
+        } else {
+          current_car = car_emergency;
+          _up_solo_to_bridge();
+        }
+      } else if (norm_right >= 2) {
+        _up_two_to_bridge();
+      } else if (norm_right == 1) {
+        _up_solo_to_bridge();
+      } else {
+        sema_down(&general_sema);
+        sema_down(&general_sema);
+      }
+      break;
+    default:
+      break;
   }
 }
 
-// Called before test. Can initialize some synchronization objects.
-void narrow_bridge_init(void) {
-  is_moving_started = false;
-  type = 0;
-  sema_init( & bridge_sema, 1);
-  for (int i = 0; i < 2; i++) {
-    sema_init( & directions_sema[i][0], 0);
-    sema_init( & directions_sema[i][1], 0);
+void update_counts(enum car_priority prio, enum car_direction dir, enum operation oper) {
+  switch (oper) {
+    case increment:
+      if (prio == car_normal && dir == dir_left) {
+        norm_left++;
+      } else if (prio == car_emergency && dir == dir_left) {
+        emer_left++;
+      } else if (prio == car_normal && dir == dir_right) {
+        norm_right++;
+      } else if (prio == car_emergency && dir == dir_right) {
+        emer_right++;
+      }
+      break;
+    case decrement:
+      if (prio == car_normal && dir == dir_left) {
+        norm_left--;
+      } else if (prio == car_emergency && dir == dir_left) {
+        emer_left--;
+      } else if (prio == car_normal && dir == dir_right) {
+        norm_right--;
+      } else if (prio == car_emergency && dir == dir_right) {
+        emer_right--;
+      }
+      break;
+    default:
+      break;
   }
+}
+
+void car_sema_down(enum car_priority prio, enum car_direction dir) {
+  if (prio == car_normal && dir == dir_left) {
+    sema_down(&norm_left_sema);
+  } else if (prio == car_emergency && dir == dir_left) {
+    sema_down(&emer_left_sema);
+  } else if (prio == car_normal && dir == dir_right) {
+    sema_down(&norm_right_sema);
+  } else if (prio == car_emergency && dir == dir_right) {
+    sema_down(&emer_right_sema);
+  }
+}
+
+enum car_direction opos_dir(enum car_direction dir) {
+  if (dir == dir_left) {
+    return dir_right;
+  }
+  return dir_left;
+}
+
+/** Called before test. Can initialize some synchronization objects. */
+void narrow_bridge_init(void) {
+  sema_init(&general_sema, 1);
+  sema_init(&norm_left_sema, 0);
+  sema_init(&emer_left_sema, 0);
+  sema_init(&norm_right_sema, 0);
+  sema_init(&emer_right_sema, 0);
 }
 
 void arrive_bridge(enum car_priority prio, enum car_direction dir) {
-  cars_counts[prio][dir]++;
-  thread_yield(); // Count all types of cars
-  if (!is_moving_started) {
-    current_dir = ((cars_counts[1][0] > cars_counts[1][1] && cars_counts[1][0] !=
-      cars_counts[1][1]) ? dir_left : dir_right); // Choose start direction
-    if (cars_counts[1][0] == cars_counts[1][1])
-      current_dir = ((cars_counts[0][0] >= cars_counts[0][1]) ? dir_left : dir_right);
-    all_active_cars = cars_counts[0][0] + cars_counts[0][1] + cars_counts[1][0] +
-      cars_counts[1][1];
-    is_moving_started = true;
-  }
-  if (all_active_cars > 1) // Block all cars and move them to their semaphores
-  {
-    all_active_cars--;
-    sema_down( & directions_sema[prio][dir]);
-  }
-  if (all_active_cars == 1) // If last non blocked car then we should start "list"
-  {
-    all_active_cars--;
-    for (uint8_t i = 0; i < 2; i++) {
-      sema_up( & bridge_sema);
+  update_counts(prio, dir, increment);
+  thread_yield();
+
+  if (was_started == 0) {
+    if (emer_left > emer_right) {
+      current_direction == dir_left;
+    } else if (emer_left < emer_right) {
+      current_direction == dir_right;
+    } else if (norm_left > norm_right) {
+      current_direction == dir_left;
+    } else if (norm_left < norm_right) {
+      current_direction == dir_right;
     }
+    cars_unblocked = norm_left + emer_left + norm_right + emer_right;
+    was_started = 1;
+  }
+  if (cars_unblocked > 1) {
+    cars_unblocked--;
+    car_sema_down(prio, dir);
+  }
+  if (cars_unblocked == 1) {
+    cars_unblocked--;
+    sema_up(&general_sema);
+    sema_up(&general_sema);
     move_to_bridge();
-    sema_down( & directions_sema[prio][dir]);
+    car_sema_down(prio, dir);
   }
 }
 
 void exit_bridge(enum car_priority prio, enum car_direction dir) {
-  cars_counts[prio][dir]--;
-  current_cars_count = cars_counts[0][0] + cars_counts[0][1] + cars_counts[1][0] +
-    cars_counts[1][1]; // Count all cars
-  occupied_places--;
-  if (current_cars_count && occupied_places % 2 == 0) // If we have cars and our bridge is not empty
-  {
-    if (!cars_counts[1][current_dir ^ 1] && cars_counts[1][current_dir])
-      current_dir ^= 1;
-    if ((current_dir == dir_right || current_dir == dir_left) && !(cars_counts[0][current_dir ^
-        1
-      ] + cars_counts[1][current_dir ^ 1]))
-      current_dir ^= 1;
-    current_dir ^= 1;
-    for (uint8_t i = 0; i < 2; i++) // Move cars from bridge
-    {
-      sema_up( & bridge_sema);
+  update_counts(prio, dir, decrement);
+  cars_overall = norm_left + emer_left + norm_right + emer_right;
+  now_crossing--;
+  if (cars_overall != 0 && now_crossing % 2 == 0) {
+    if (current_direction == dir_left) {
+      if (emer_right == 0 && emer_left > 0) {
+        current_direction = opos_dir(current_direction);
+      }
+      if (current_direction == dir_left) {
+        if ((current_direction == dir_right || current_direction == dir_left) && (norm_right + emer_right) == 0) {
+          current_direction = opos_dir(current_direction);
+        }
+      } else if (current_direction == dir_right) {
+        if ((current_direction == dir_right || current_direction == dir_left) && (norm_left + emer_left) == 0) {
+          current_direction = opos_dir(current_direction);
+        }
+      }
+    } else if (current_direction == dir_right) {
+      if (emer_left == 0 && emer_right > 0) {
+        current_direction = opos_dir(current_direction);
+      }
+      if (current_direction == dir_left) {
+        if ((current_direction == dir_right || current_direction == dir_left) && (norm_right + emer_right) == 0) {
+          current_direction = opos_dir(current_direction);
+        }
+      } else if (current_direction == dir_right) {
+        if ((current_direction == dir_right || current_direction == dir_left) && (norm_left + emer_left) == 0) {
+          current_direction = opos_dir(current_direction);
+        }
+      }
     }
+    current_direction = opos_dir(current_direction);
+    sema_up(&general_sema);
+    sema_up(&general_sema);
     move_to_bridge();
   }
 }
