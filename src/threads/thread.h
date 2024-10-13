@@ -90,7 +90,7 @@ struct thread
     uint8_t *stack;                     /**< Saved stack pointer. */
     int priority;                       /**< Priority. */
 
-    int64_t wake_time;                  /** Thread wakeup time in ticks. */
+    int64_t wake_time;
     struct semaphore sema;
 
     struct list_elem allelem;           /**< List element for all threads list. */

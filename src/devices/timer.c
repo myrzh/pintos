@@ -5,10 +5,9 @@
 #include <stdio.h>
 #include "devices/pit.h"
 #include "threads/interrupt.h"
-#include "threads/synch.h"
 #include "threads/thread.h"
+#include "threads/synch.h"
 #include <stdlib.h>
-#include "threads/malloc.h"
   
 /** See [8254] for hardware details of the 8254 timer chip. */
 
@@ -32,9 +31,7 @@ static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
 
-/** List of processes in THREAD_BLOCKED state. */
-// static struct list wait_list;
-struct thread **wait_list;
+struct thread * wait_list[100];
 int wait_list_size = 0;
 
 int compare_threads(const void *a, const void *b) {
@@ -117,14 +114,8 @@ timer_sleep (int64_t ticks)
   intr_disable ();
 
   wait_list_size++;
-  if (wait_list_size <= 1) {
-    wait_list = (struct thread**)malloc(sizeof(struct thread *));
-    wait_list[0] = t;
-  } else {
-    wait_list = (struct thread**)realloc(wait_list, (wait_list_size) * sizeof(struct thread *));
-    wait_list[wait_list_size] = t;
-    qsort(wait_list, wait_list_size, sizeof(struct thread *), compare_threads);
-  }
+  wait_list[wait_list_size - 1] = t;
+  qsort(wait_list, wait_list_size, sizeof(struct thread *), compare_threads);
 
   intr_enable ();
 
@@ -210,12 +201,12 @@ timer_interrupt (struct intr_frame *args UNUSED)
   struct thread *t;
 
   while (wait_list_size > 0) {
-    t = wait_list[wait_list_size - 1];
-    if (ticks < t->wake_time)
-      break;
-    sema_up(&t->sema);
-    wait_list[wait_list_size - 1] = NULL;
-    wait_list_size--;
+      t = wait_list[wait_list_size - 1];
+      if (ticks < t->wake_time)
+        break;
+      sema_up(&t->sema);
+      wait_list[wait_list_size - 1] = NULL;
+      wait_list_size--;
   }
 }
 
