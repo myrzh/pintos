@@ -26,19 +26,21 @@ enum car_direction current_direction;
 
 /** Set two cars of one type if bridge if full emty */
 void _up_two_to_bridge() {
-  if (current_car == car_normal && current_direction == dir_left) {
-    sema_up(&norm_left_sema);
-  } else if (current_car == car_emergency && current_direction == dir_left) {
-    sema_up(&emer_left_sema);
-  } else if (current_car == car_normal && current_direction == dir_right) {
-    sema_up(&norm_right_sema);
-  } else if (current_car == car_emergency && current_direction == dir_right) {
-    sema_up(&emer_right_sema);
+  for (int i = 0; i < 2; i++) {
+    if (current_car == car_normal && current_direction == dir_left) {
+      sema_up(&norm_left_sema);
+    } else if (current_car == car_emergency && current_direction == dir_left) {
+      sema_up(&emer_left_sema);
+    } else if (current_car == car_normal && current_direction == dir_right) {
+      sema_up(&norm_right_sema);
+    } else if (current_car == car_emergency && current_direction == dir_right) {
+      sema_up(&emer_right_sema);
+    }
+    sema_down(&general_sema);
   }
-  sema_down(&general_sema);
   now_crossing += 2;
   current_car = car_normal;
-}  
+}
 
 void _up_solo_to_bridge() {
   sema_down(&general_sema);
