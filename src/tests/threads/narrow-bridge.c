@@ -62,10 +62,18 @@ void _up_solo_to_bridge() {
 void _last_emer_w_normal() {
   if (current_direction == dir_left) {
     sema_up(&emer_left_sema);
-    sema_up(&norm_left_sema);
+    if (current_direction == dir_left) {
+      sema_up(&norm_left_sema);
+    } else if (current_direction == dir_right) {
+      sema_up(&norm_right_sema);
+    }
   } else if (current_direction == dir_right) {
     sema_up(&emer_right_sema);
-    sema_up(&norm_right_sema);
+    if (current_direction == dir_right) {
+      sema_up(&norm_right_sema);
+    } else if (current_direction == dir_left) {
+      sema_up(&norm_left_sema);
+    }
   }
   sema_down(&general_sema);
   sema_down(&general_sema);
@@ -183,13 +191,13 @@ void arrive_bridge(enum car_priority prio, enum car_direction dir) {
 
   if (was_started == 0) {
     if (emer_left > emer_right) {
-      current_direction == dir_left;
+      current_direction = dir_left;
     } else if (emer_left < emer_right) {
-      current_direction == dir_right;
-    } else if (norm_left > norm_right) {
-      current_direction == dir_left;
+      current_direction = dir_right;
+    } else if (norm_left >= norm_right) {
+      current_direction = dir_left;
     } else if (norm_left < norm_right) {
-      current_direction == dir_right;
+      current_direction = dir_right;
     }
     cars_unblocked = norm_left + emer_left + norm_right + emer_right;
     was_started = 1;
@@ -203,7 +211,7 @@ void arrive_bridge(enum car_priority prio, enum car_direction dir) {
     sema_up(&general_sema);
     sema_up(&general_sema);
     move_to_bridge();
-    car_sema_down(prio, dir);
+    car_sema_down(prio, dir); // DEADLOCK
   }
 }
 
