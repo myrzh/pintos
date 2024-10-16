@@ -113,8 +113,10 @@ void choose_and_place() {
   } else if (emer_count == 1 || norm_count >= 2) { // If we have one emer or at least two norms
     if (emer_count == 1) {
       current_car = car_emergency;
+      place_car(one);       // If one emer, place it
+    } else {
+      place_car(two_equal); // Otherwise, place two norms
     }
-    place_car(emer_count == 1 ? one : two_equal);  // Place one emer or two norms
   } else {                  // If no cars in current direction ...
     sema_down(&mutex_sema); // ... block the bridge anyway
     sema_down(&mutex_sema);
