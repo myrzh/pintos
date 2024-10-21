@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "palloc.h": "c",
+        "malloc.h": "c",
+        "vaddr.h": "c",
+        "stdlib.h": "c"
+    }
+}

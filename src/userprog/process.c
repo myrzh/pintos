@@ -18,10 +18,12 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "lib/string.h"
+#include "threads/malloc.h"
+#include "threads/synch.h"
 
-struct semaphore *busy;
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+struct semaphore process_sema;
 
 /** Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -30,9 +32,9 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 tid_t
 process_execute (const char *file_name) 
 {
+  sema_init(&process_sema, 0);
   char *fn_copy;
   tid_t tid;
-  sema_init(&busy, 0);
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -91,7 +93,7 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  sema_down(&busy);
+  sema_down(&process_sema);
   return -1;
 }
 
@@ -117,8 +119,8 @@ process_exit (void)
       cur->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
-      sema_up(&busy);
       printf("%s: exit(%d)\n", cur->name, cur->exit_code);
+      sema_up(&process_sema);
     }
 }
 
@@ -222,7 +224,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   int i;
 
   char* current_arg_ptr; 
-  char* argv[128];
+  char* argv[100];
   int argc = 0;
   size_t remaining_len;
   char* save_ptr; // Save pointer for strtok_r
@@ -336,14 +338,13 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   char* save; 
   // Tokenize the remaining string to extract arguments
-  current_arg_ptr = strtok_r(save_ptr, " ", &save);
-  while (current_arg_ptr != NULL) {
-    remaining_len = strlen(current_arg_ptr) + 1; // Include null terminator
-    *esp -= remaining_len;            // Move stack pointer
-    memcpy(*esp, current_arg_ptr, remaining_len); // Copy argument to stack
-    argv[argc] = *esp;         // Save address of argument
-    argc++;
-    current_arg_ptr = strtok_r(NULL, " ", &save); // Get next argument
+  // Tokenize and push remaining arguments onto the stack
+  while ((current_arg_ptr = strtok_r(save_ptr, " ", &save)) != NULL) {
+    remaining_len = strlen(current_arg_ptr) + 1;
+    *esp -= remaining_len;
+    memcpy(*esp, current_arg_ptr, remaining_len);
+    argv[argc++] = *esp;
+    save_ptr = NULL;  // Continue tokenizing the same string
   }
 
   *esp -= sizeof(uint8_t) * ((uint32_t)* esp % 4) + 4; // Align stack pointer
@@ -355,15 +356,17 @@ load (const char *file_name, void (**eip) (void), void **esp)
     memcpy(*esp, &argv[i], 4);
   }
 
-  char* ptr = *esp;
-  *esp -= 4;
+  // Save argv pointer onto the stack
+  char **argv_ptr = *esp;
+  *esp -= sizeof(char*);
+  memcpy(*esp, &argv_ptr, sizeof(char*));
 
-  memcpy(*esp, &ptr, 4);
-  *esp -= 4;
+  // Push argc and fake return address onto the stack
+  *esp -= sizeof(int);
+  memcpy(*esp, &argc, sizeof(int));
 
-  //Записываем кол-во аргументов в стек
-  memcpy(*esp, &argc, 4); 
-  *esp -= 4;
+  *esp -= sizeof(void*);  // Fake return address (null)
+  memset(*esp, 0, sizeof(void*));
 
  done:
   /* We arrive here whether the load is successful or not. */
