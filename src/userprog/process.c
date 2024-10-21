@@ -17,7 +17,9 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "lib/string.h"
 
+struct semaphore *busy;
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
@@ -30,6 +32,7 @@ process_execute (const char *file_name)
 {
   char *fn_copy;
   tid_t tid;
+  sema_init(&busy, 0);
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -88,6 +91,7 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  sema_down(&busy);
   return -1;
 }
 
@@ -113,6 +117,8 @@ process_exit (void)
       cur->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
+      sema_up(&busy);
+      printf("%s: exit(%d)\n", cur->name, cur->exit_code);
     }
 }
 
@@ -215,6 +221,18 @@ load (const char *file_name, void (**eip) (void), void **esp)
   bool success = false;
   int i;
 
+  char* current_arg_ptr; 
+  char* argv[128];
+  int argc = 0;
+  size_t remaining_len;
+  char* save_ptr; // Save pointer for strtok_r
+  char* fname = (char *)malloc(sizeof(char) * (strlen(file_name) + 1));
+  ASSERT(fname != NULL);
+  strlcpy(fname, file_name, strlen(file_name) + 1);  // Copy file_name to fname
+  fname = strtok_r(fname, " ", &save_ptr); // Extract the first token
+
+  strlcpy(thread_current()->name, fname, strlen(fname) + 1); // Set thread name
+  
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
@@ -222,10 +240,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
-  file = filesys_open (file_name);
+  file = filesys_open (fname);
   if (file == NULL) 
     {
-      printf ("load: %s: open failed\n", file_name);
+      printf ("load: %s: open failed\n", fname);
       goto done; 
     }
 
@@ -238,7 +256,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024) 
     {
-      printf ("load: %s: error loading executable\n", file_name);
+      printf ("load: %s: error loading executable\n", fname);
       goto done; 
     }
 
@@ -309,6 +327,43 @@ load (const char *file_name, void (**eip) (void), void **esp)
   *eip = (void (*) (void)) ehdr.e_entry;
 
   success = true;
+
+  remaining_len = strlen(fname) + 1;// '\0' 
+  *esp -= remaining_len;
+  memcpy(*esp, fname, remaining_len); 
+  argv[argc] = *esp;  
+  argc++;
+
+  char* save; 
+  // Tokenize the remaining string to extract arguments
+  current_arg_ptr = strtok_r(save_ptr, " ", &save);
+  while (current_arg_ptr != NULL) {
+    remaining_len = strlen(current_arg_ptr) + 1; // Include null terminator
+    *esp -= remaining_len;            // Move stack pointer
+    memcpy(*esp, current_arg_ptr, remaining_len); // Copy argument to stack
+    argv[argc] = *esp;         // Save address of argument
+    argc++;
+    current_arg_ptr = strtok_r(NULL, " ", &save); // Get next argument
+  }
+
+  *esp -= sizeof(uint8_t) * ((uint32_t)* esp % 4) + 4; // Align stack pointer
+
+  //Запись адресов строк
+  for (int i = argc - 1; i >= 0; i--)
+  {
+    *esp -= 4;
+    memcpy(*esp, &argv[i], 4);
+  }
+
+  char* ptr = *esp;
+  *esp -= 4;
+
+  memcpy(*esp, &ptr, 4);
+  *esp -= 4;
+
+  //Записываем кол-во аргументов в стек
+  memcpy(*esp, &argc, 4); 
+  *esp -= 4;
 
  done:
   /* We arrive here whether the load is successful or not. */
