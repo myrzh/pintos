@@ -191,12 +191,12 @@ void exit_bridge(enum car_priority prio, enum car_direction dir) {
   now_crossing--;
 
   if (cars_overall != 0 && now_crossing % 2 == 0) { // If we still have waiting cars and the bridge is free
-    // Change direction if there are emers in the other direction
+    // Change direction if there are no emers in the other direction
     if ((current_direction == dir_left && emer_right == 0 && emer_left > 0) ||
         (current_direction == dir_right && emer_left == 0 && emer_right > 0)) {
       current_direction = (current_direction == dir_left) ? dir_right : dir_left;
     } else {
-    // Otherwise, change direction if there are no cars in the current direction
+    // Otherwise, change direction if there are no cars in the other direction
       if ((current_direction == dir_left && (norm_right + emer_right) == 0) ||
           (current_direction == dir_right && (norm_left + emer_left) == 0)) {
         current_direction = (current_direction == dir_left) ? dir_right : dir_left;
