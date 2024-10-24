@@ -15,7 +15,7 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *f) 
 {
-  switch (((size_t*)f->esp)[0]) {
+  switch (((int*)f->esp)[0]) {
     case SYS_WRITE:
       putbuf(((const char**)f->esp)[2], ((size_t*)f->esp)[3]);
       break;
