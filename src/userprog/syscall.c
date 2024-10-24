@@ -20,12 +20,12 @@ syscall_handler (struct intr_frame *f)
       putbuf(((const char **)f->esp)[2], ((size_t *)f->esp)[3]);
       break;
     case SYS_EXIT:
-      // printf ("system call!\n");
       thread_current()->exit_code = ((int *)f->esp)[1];
-      thread_exit ();
+      thread_exit();
       break;
     default:
-      return;
+      printf("system call!\n");
+      thread_exit();
       break;
   }
 }
