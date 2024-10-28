@@ -9,23 +9,40 @@
 #include "narrow-bridge.h"
 #include "threads/synch.h"
 
+enum action
+{
+   arrive = 0,
+   exit = 1
+};
+
 struct semaphore norm_left_sema, emer_left_sema, norm_right_sema, emer_right_sema;
 int norm_left = 0, emer_left = 0, norm_right = 0, emer_right = 0;
 int now_crossing = 0;
 
-void process_arrived_car(enum car_priority prio, enum car_direction dir) {
+void process_car(enum car_priority prio, enum car_direction dir, enum action act) {
+    int *count = NULL;
+    struct semaphore *sema = NULL;
+
     if (prio == car_normal && dir == dir_left) {
-        norm_left++;
-        sema_down(&norm_left_sema);
+        count = &norm_left;
+        sema = &norm_left_sema;
     } else if (prio == car_emergency && dir == dir_left) {
-        emer_left++;
-        sema_down(&emer_left_sema);
+        count = &emer_left;
+        sema = &emer_left_sema;
     } else if (prio == car_normal && dir == dir_right) {
-        norm_right++;
-        sema_down(&norm_right_sema);
+        count = &norm_right;
+        sema = &norm_right_sema;
     } else if (prio == car_emergency && dir == dir_right) {
-        emer_right++;
-        sema_down(&emer_right_sema);
+        count = &emer_right;
+        sema = &emer_right_sema;
+    }
+
+    if (act == arrive) {
+        (*count)++;
+        sema_down(sema);
+    } else if (act == exit) {
+        (*count)--;
+        sema_up(sema);
     }
 }
 
@@ -41,9 +58,11 @@ void narrow_bridge_init(void)
 void arrive_bridge(enum car_priority prio, enum car_direction dir)
 {    
     if (prio == car_emergency && now_crossing == 2) {
-        process_arrived_car(car_emergency, dir);
+        process_car(car_emergency, dir, arrive);
+        // process_arriving_car(car_emergency, dir);
     } else if ((prio == car_normal && now_crossing == 2) || ((dir == dir_left) ? emer_left : emer_right) > 0) {
-        process_arrived_car(car_normal, dir);
+        process_car(car_normal, dir, arrive);
+        // process_arriving_car(car_normal, dir);
     }
     now_crossing++;
 }
@@ -52,41 +71,31 @@ void exit_bridge(enum car_priority prio UNUSED, enum car_direction dir UNUSED)
 {
     if (now_crossing > 0) {
         now_crossing--;
-    } 
+    }
     if (now_crossing == 0) {
         if (emer_right > 0) {
-            sema_up(&emer_right_sema);
-            emer_right--;
+            process_car(car_emergency, dir_right, exit);
             if (emer_right > 0) {
-                sema_up(&emer_right_sema);
-                emer_right--;
+                process_car(car_emergency, dir_right, exit);
             } else if (norm_right > 0) {
-                sema_up(&norm_right_sema);
-                norm_right--;
+                process_car(car_normal, dir_right, exit);
             }
         } else if (emer_left > 0) {
-            sema_up(&emer_left_sema);
-            emer_left--;
+            process_car(car_emergency, dir_left, exit);
             if (emer_left > 0) {
-                sema_up(&emer_left_sema);
-                emer_left--;
+                process_car(car_emergency, dir_left, exit);
             } else if (norm_left > 0) {
-                sema_up(&norm_left_sema);
-                norm_left--;
+                process_car(car_normal, dir_left, exit);
             }
         } else if (norm_right > 0) {
-            sema_up(&norm_right_sema);
-            norm_right--;
+            process_car(car_normal, dir_right, exit);
             if (norm_right > 0) {
-                sema_up(&norm_right_sema);
-                norm_right--;
-            } 
+                process_car(car_normal, dir_right, exit);
+            }
         } else if (norm_left > 0) {
-            sema_up(&norm_left_sema);
-            norm_left--;
+            process_car(car_normal, dir_left, exit);
             if (norm_left > 0) {
-                sema_up(&norm_left_sema);
-                norm_left--;
+                process_car(car_normal, dir_left, exit);
             }
         }
     }
