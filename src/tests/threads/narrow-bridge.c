@@ -77,7 +77,7 @@ void exit_bridge(enum car_priority prio UNUSED, enum car_direction dir UNUSED)
     if (now_crossing == 0) { // If the bridge is free, let the next cars go
         // Every combination of priorities and directions
         // First emergency cars, then normal cars. Left is prior to right
-        enum car_priority priorities[] = {car_emergency, car_emergency, car_normal, car_normal}; // 
+        enum car_priority priorities[] = {car_emergency, car_emergency, car_normal, car_normal};
         enum car_direction directions[] = {dir_left, dir_right, dir_left, dir_right};
         int *counts[] = {&emer_left, &emer_right, &norm_left, &norm_right};
         for (int i = 0; i < 4; i++) { // For every combination of priorities and directions
