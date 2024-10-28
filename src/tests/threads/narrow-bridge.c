@@ -19,6 +19,7 @@ struct semaphore norm_left_sema, emer_left_sema, norm_right_sema, emer_right_sem
 int norm_left = 0, emer_left = 0, norm_right = 0, emer_right = 0;
 int now_crossing = 0;
 
+//** Change counts and semaphores according to needed action */
 void process_car(enum car_priority prio, enum car_direction dir, enum action act) {
     int *count = NULL;
     struct semaphore *sema = NULL;
@@ -46,7 +47,7 @@ void process_car(enum car_priority prio, enum car_direction dir, enum action act
     }
 }
 
-// Called before test. Can initialize some synchronization objects.
+/** Called before test. Can initialize some synchronization objects. */
 void narrow_bridge_init(void)
 {
     sema_init(&norm_left_sema, 0);
@@ -55,47 +56,47 @@ void narrow_bridge_init(void)
     sema_init(&emer_right_sema, 0);
 }
 
+/** Called every time the new car arrives */
 void arrive_bridge(enum car_priority prio, enum car_direction dir)
 {    
     if (prio == car_emergency && now_crossing == 2) {
         process_car(car_emergency, dir, arrive);
-        // process_arriving_car(car_emergency, dir);
     } else if ((prio == car_normal && now_crossing == 2) || ((dir == dir_left) ? emer_left : emer_right) > 0) {
         process_car(car_normal, dir, arrive);
-        // process_arriving_car(car_normal, dir);
     }
     now_crossing++;
 }
 
+/** Called every time the car needs to exit the bridge */
 void exit_bridge(enum car_priority prio UNUSED, enum car_direction dir UNUSED)
 {
     if (now_crossing > 0) {
         now_crossing--;
     }
     if (now_crossing == 0) {
-        if (emer_right > 0) {
-            process_car(car_emergency, dir_right, exit);
-            if (emer_right > 0) {
-                process_car(car_emergency, dir_right, exit);
-            } else if (norm_right > 0) {
-                process_car(car_normal, dir_right, exit);
-            }
-        } else if (emer_left > 0) {
+        if (emer_left > 0) {
             process_car(car_emergency, dir_left, exit);
             if (emer_left > 0) {
                 process_car(car_emergency, dir_left, exit);
             } else if (norm_left > 0) {
                 process_car(car_normal, dir_left, exit);
             }
-        } else if (norm_right > 0) {
-            process_car(car_normal, dir_right, exit);
-            if (norm_right > 0) {
+        } else if (emer_right > 0) {
+            process_car(car_emergency, dir_right, exit);
+            if (emer_right > 0) {
+                process_car(car_emergency, dir_right, exit);
+            } else if (norm_right > 0) {
                 process_car(car_normal, dir_right, exit);
             }
         } else if (norm_left > 0) {
             process_car(car_normal, dir_left, exit);
             if (norm_left > 0) {
                 process_car(car_normal, dir_left, exit);
+            }
+        } else if (norm_right > 0) {
+            process_car(car_normal, dir_right, exit);
+            if (norm_right > 0) {
+                process_car(car_normal, dir_right, exit);
             }
         }
     }
