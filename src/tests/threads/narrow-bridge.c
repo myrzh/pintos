@@ -74,13 +74,13 @@ void exit_bridge(enum car_priority prio UNUSED, enum car_direction dir UNUSED)
     if (now_crossing == 0) {
         enum car_priority priorities[] = {car_emergency, car_emergency, car_normal, car_normal};
         enum car_direction directions[] = {dir_left, dir_right, dir_left, dir_right};
-        int counts[] = {emer_left, emer_right, norm_left, norm_right};
+        int *counts[] = {&emer_left, &emer_right, &norm_left, &norm_right};
         for (int i = 0; i < 4; i++) {
-            if (counts[i] > 0) {
+            if (*counts[i] > 0) {
                 process_car(priorities[i], directions[i], exit);
-                if (counts[i] > 0) {
+                if (*counts[i] > 0) {
                     process_car(priorities[i], directions[i], exit);
-                } else if (i < 2 && counts[i + 2] > 0) { 
+                } else if (i < 2 && *counts[i + 2] > 0) { 
                     process_car(car_normal, directions[i], exit);
                 }
                 break;
