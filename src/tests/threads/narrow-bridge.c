@@ -19,11 +19,10 @@ struct semaphore norm_left_sema, emer_left_sema, norm_right_sema, emer_right_sem
 int norm_left = 0, emer_left = 0, norm_right = 0, emer_right = 0;
 int now_crossing = 0;
 
-//** Change counts and semaphores according to needed action */
+/** Change counts and semaphores according to needed action */
 void process_car(enum car_priority prio, enum car_direction dir, enum action act) {
     int *count = NULL;
     struct semaphore *sema = NULL;
-
     if (prio == car_normal && dir == dir_left) {
         count = &norm_left;
         sema = &norm_left_sema;
@@ -37,7 +36,6 @@ void process_car(enum car_priority prio, enum car_direction dir, enum action act
         count = &emer_right;
         sema = &emer_right_sema;
     }
-
     if (act == arrive) {
         (*count)++;
         sema_down(sema);
@@ -74,29 +72,18 @@ void exit_bridge(enum car_priority prio UNUSED, enum car_direction dir UNUSED)
         now_crossing--;
     }
     if (now_crossing == 0) {
-        if (emer_left > 0) {
-            process_car(car_emergency, dir_left, exit);
-            if (emer_left > 0) {
-                process_car(car_emergency, dir_left, exit);
-            } else if (norm_left > 0) {
-                process_car(car_normal, dir_left, exit);
-            }
-        } else if (emer_right > 0) {
-            process_car(car_emergency, dir_right, exit);
-            if (emer_right > 0) {
-                process_car(car_emergency, dir_right, exit);
-            } else if (norm_right > 0) {
-                process_car(car_normal, dir_right, exit);
-            }
-        } else if (norm_left > 0) {
-            process_car(car_normal, dir_left, exit);
-            if (norm_left > 0) {
-                process_car(car_normal, dir_left, exit);
-            }
-        } else if (norm_right > 0) {
-            process_car(car_normal, dir_right, exit);
-            if (norm_right > 0) {
-                process_car(car_normal, dir_right, exit);
+        enum car_priority priorities[] = {car_emergency, car_emergency, car_normal, car_normal};
+        enum car_direction directions[] = {dir_left, dir_right, dir_left, dir_right};
+        int counts[] = {emer_left, emer_right, norm_left, norm_right};
+        for (int i = 0; i < 4; i++) {
+            if (counts[i] > 0) {
+                process_car(priorities[i], directions[i], exit);
+                if (counts[i] > 0) {
+                    process_car(priorities[i], directions[i], exit);
+                } else if (i < 2 && counts[i + 2] > 0) { 
+                    process_car(car_normal, directions[i], exit);
+                }
+                break;
             }
         }
     }
