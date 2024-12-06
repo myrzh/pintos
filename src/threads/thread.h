@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "userprog/syscall.h"
 
 /** States in a thread's life cycle. */
 enum thread_status
@@ -82,7 +83,6 @@ typedef int tid_t;
    blocked state is on a semaphore wait list. */
 struct thread
   {
-   short exit_code;
     /* Owned by thread.c. */
     tid_t tid;                          /**< Thread identifier. */
     enum thread_status status;          /**< Thread state. */
@@ -101,6 +101,17 @@ struct thread
 
     /* Owned by thread.c. */
     unsigned magic;                     /**< Detects stack overflow. */
+
+    /* Owned by userprog/syscall.c. */
+    struct list file_handle_list;       /**< List of file handles */
+    int fd;                             /**< File descriptor */
+    
+    struct list child_list;             /**< List of child processes */
+    tid_t parent;                       /**< Parent process ID */
+    
+    struct child_process* cp;           /**< Child process */
+    struct file* this_exec;             /**< Executable file of this thread */
+    struct list aquired_locks;          /**< List of locks aquired by this thread */
   };
 
 /** If false (default), use round-robin scheduler.
@@ -138,5 +149,9 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+int thread_exists (int pid);
+struct child_process* register_child_process (int pid);
+void thread_release_owned_locks (void);
 
 #endif /**< threads/thread.h */

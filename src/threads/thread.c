@@ -11,8 +11,10 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/malloc.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "userprog/syscall.h"
 #endif
 
 /** Random value for struct thread's `magic' member.
@@ -198,6 +200,11 @@ thread_create (const char *name, int priority,
   sf->eip = switch_entry;
   sf->ebp = 0;
 
+  /* Add the child process to a child list. */
+  t->parent = thread_tid();
+  struct child_process *cp = register_child_process(t->tid);
+  t->cp = cp;
+
   /* Add to run queue. */
   thread_unblock (t);
 
@@ -290,6 +297,7 @@ thread_exit (void)
      and schedule another process.  That process will destroy us
      when it calls thread_schedule_tail(). */
   intr_disable ();
+  thread_release_owned_locks(); // Release the locks thread holds
   list_remove (&thread_current()->allelem);
   thread_current ()->status = THREAD_DYING;
   schedule ();
@@ -466,6 +474,15 @@ init_thread (struct thread *t, const char *name, int priority)
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
+
+  list_init(&t->file_handle_list);
+  t->fd = 3;                  // File descriptor takes at least 3, since 0, 1 and 2 are reserved
+  list_init(&t->child_list);
+  t->cp = NULL;               // No children at init
+  t->parent = -1;             // No parent at init
+  list_init(&t->aquired_locks);
+  t->this_exec = NULL;
+
   intr_set_level (old_level);
 }
 
@@ -582,3 +599,56 @@ allocate_tid (void)
 /** Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
+/** Check if a thread with given pid exists */
+int
+thread_exists (int pid)
+{
+  struct list_elem *element;
+  struct list_elem *next;
+  for (element = list_begin(&all_list); element != list_end(&all_list); element = next)
+  {
+    next = list_next(element);
+    struct thread *t = list_entry (element, struct thread, allelem);
+    if (t->tid == pid)
+    {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/** Register a child process and add it to the child list */
+struct child_process*
+register_child_process (int pid)
+{
+  struct child_process *new_cp = malloc(sizeof(struct child_process));
+
+  new_cp->pid = pid;
+  new_cp->load_status = NOT_LOADED;
+  new_cp->is_waiting = 0;
+  new_cp->is_exit = 0;
+  sema_init(&new_cp->load_sema, 0);
+  sema_init(&new_cp->exit_sema, 0);
+
+  list_push_back(&thread_current()->child_list, &new_cp->elem);
+
+  return new_cp;
+}
+
+/** Releases all locks currently held by the calling thread. */
+void
+thread_release_owned_locks (void)
+{
+  struct thread *t = thread_current();
+  struct list_elem *e;
+  struct list_elem *next;
+  
+  for (e = list_begin(&t->aquired_locks); e != list_end(&t->aquired_locks); e = next)
+  {
+    next = list_next(e);
+    struct lock *lock_ptr = list_entry (e, struct lock, elem);
+    lock_release(lock_ptr);
+    list_remove(&lock_ptr->elem);
+  }
+}

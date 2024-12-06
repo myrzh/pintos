@@ -22,7 +22,6 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp, char **save_ptr);
-struct semaphore process_sema;
 
 /** Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -31,7 +30,6 @@ struct semaphore process_sema;
 tid_t
 process_execute (const char *file_name) 
 {
-  sema_init(&process_sema, 0);
   char *fn_copy;
   tid_t tid;
 
@@ -74,6 +72,17 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp, &save_ptr);
 
+  // If load failed, set the load status to LOAD_FAILED
+  if (success) {
+    thread_current()->cp->load_status = LOADED;
+  }
+  else {
+    thread_current()->cp->load_status = LOAD_FAILED;
+  }
+
+  // Notify the parent that the child has loaded
+  sema_up (&thread_current()->cp->load_sema);
+
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
@@ -99,10 +108,37 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  sema_down(&process_sema);
-  return -1;
+  struct child_process* child_process_pointer = get_child_process_by_pid(child_tid);
+
+  // If the child process does not exist, return -1
+  if (!child_process_pointer)
+  {
+    return -1;
+  }
+  
+  // If the child process is already waiting, return -1
+  if (child_process_pointer->is_waiting)
+  {
+    return -1;
+  }
+
+  child_process_pointer->is_waiting = 1; // Set wait for child to true
+
+  // Wait for the child process to exit (if it has not already)
+  while (!child_process_pointer->is_exit)
+  {
+    asm volatile ("" : : : "memory");
+  }
+
+  // Get the status of the child process
+  int status = child_process_pointer->status;
+
+  // Remove the child process from the list
+  delete_child_process(child_process_pointer);
+
+  return status;
 }
 
 /** Free the current process's resources. */
@@ -111,6 +147,27 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+
+  // Close all files
+  lock_acquire(&filesys_lock);
+  terminate_file_access(-1);
+  
+  // Close the executable file if there is one
+  if (cur->this_exec)
+  {
+    file_close(cur->this_exec); // from file.h
+  }
+  lock_release(&filesys_lock);
+  
+  // Remove all child processes of the current thread
+  cleanup_child_processes();
+  
+  // If the current process has a parent, notify the parent
+  if (thread_exists(cur->parent))
+  {
+    cur->cp->is_exit = 1;
+    sema_up(&cur->cp->exit_sema);
+  }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -127,8 +184,6 @@ process_exit (void)
       cur->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
-      printf("%s: exit(%d)\n", cur->name, cur->exit_code);
-      sema_up(&process_sema);
     }
 }
 
@@ -244,6 +299,10 @@ load (const char *file_name, void (**eip) (void), void **esp, char **save_ptr)
       printf ("load: %s: open failed\n", file_name);
       goto done; 
     }
+  
+  // Deny write to the executable file of the current thread
+  file_deny_write(file);
+  t->this_exec = file;
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -328,7 +387,7 @@ load (const char *file_name, void (**eip) (void), void **esp, char **save_ptr)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+  // file_close (file);
   return success;
 }
 
